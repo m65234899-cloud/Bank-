@@ -168,4 +168,4 @@ client.on('messageCreate', async (message) => {
 });
 
 client.once('ready', () => console.log(`✅ ${client.user.tag} جاهز للعمل!`));
-client.login(TOKEN);
+client.login(process.env.TOKEN);
