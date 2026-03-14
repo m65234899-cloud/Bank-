@@ -6,32 +6,33 @@ const {
     ButtonBuilder, 
     ButtonStyle, 
     ComponentType,
-    Partials // أضفنا هذه
+    Partials 
 } = require('discord.js');
+const http = require('http');
+
+// نظام Keep-alive لضمان استقرار البوت على الاستضافة
+http.createServer((req, res) => {
+    res.write("Bot is running!");
+    res.end();
+}).listen(8080);
 
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent, // ضروري جداً لقراءة الأوامر
-        GatewayIntentBits.GuildMembers,   // ضروري للتحقق من الرتبة
+        GatewayIntentBits.MessageContent, 
+        GatewayIntentBits.GuildMembers,   
     ],
-    partials: [
-        Partials.Message,
-        Partials.Channel,
-        Partials.User
-    ]
+    partials: [Partials.Message, Partials.Channel, Partials.User]
 });
 
-// هنا تضع التوكن وبقية الإعدادات
-const TOKEN = process.env.TOKEN || "توكن_بوتك_هنا"; 
+// --- الإعدادات الأساسية ---
+const TOKEN = process.env.TOKEN; 
 const CURRENCY_NAME = "فولتا";
-const ADMIN_ROLE_ID = "1472225010134421676";
+const ADMIN_ROLE_ID = "1472225010134421676"; // رتبة الإدارة
+const CREDIT_LOG_CHANNEL = "1477107661383401472"; // قناة استلام طلبات الكريدت
 
-// ... بقية الكود (الأوامر) تبدأ من هنا
-
-
-// قاعدة بيانات بسيطة (تنتهي بانتهاء تشغيل البوت - يفضل لاحقاً ربطها بـ MongoDB أو Quick.db)
+// قاعدة بيانات وهمية (تصفر عند إعادة التشغيل)
 let db = {}; 
 
 function getUserData(userId) {
@@ -41,16 +42,19 @@ function getUserData(userId) {
     return db[userId];
 }
 
-// دالة لتحويل الاختصارات (1m, 2k) إلى أرقام
 function parseAmount(input) {
+    if (!input) return null;
     const match = input.toLowerCase().match(/^(\d+(\.\d+)?)([km])?$/);
     if (!match) return null;
     let value = parseFloat(match[1]);
-    const unit = match[3];
-    if (unit === 'k') value *= 1000;
-    if (unit === 'm') value *= 1000000;
+    if (match[3] === 'k') value *= 1000;
+    if (match[3] === 'm') value *= 1000000;
     return Math.floor(value);
 }
+
+client.once('ready', (c) => {
+    console.log(`✅ ${c.user.tag} جاهز للعمل بنظام فولتا!`);
+});
 
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.content.startsWith('!')) return;
@@ -68,74 +72,50 @@ client.on('messageCreate', async (message) => {
             .addFields(
                 { name: '💰 رصيدك الحالي:', value: `**${data.balance.toLocaleString()}** ${CURRENCY_NAME}`, inline: false },
                 { name: '📜 سجل العمليات:', value: `\`\`\`${data.transactions.slice(-5).join('\n') || 'لا توجد عمليات'}\`\`\`` }
-            )
-            .setFooter({ text: `طلب بواسطة: ${message.author.username}` });
-
+            );
         return message.reply({ embeds: [embed] });
     }
 
-    // --- أمر إضافة (للإدارة فقط) ---
+    // --- أمر إضافة (إدارة فقط) ---
     if (command === 'اضافة') {
-        if (!message.member.roles.cache.has(ADMIN_ROLE_ID)) {
-            return message.reply("❌ ليس لديك صلاحية الإدارة.");
-        }
-
+        if (!message.member.roles.cache.has(ADMIN_ROLE_ID)) return message.reply("❌ ليس لديك صلاحية الإدارة.");
         const user = message.mentions.users.first();
         const amount = parseAmount(args[1]);
-
-        if (!user || isNaN(amount)) return message.reply("⚠️ الاستخدام: `!اضافة @user 50k` ");
+        if (!user || isNaN(amount)) return message.reply("⚠️ الاستخدام: `!اضافة @user 100k` ");
 
         const data = getUserData(user.id);
         data.balance += amount;
         data.transactions.push(`إيداع إداري: +${amount.toLocaleString()}`);
-
-        const embed = new EmbedBuilder()
-            .setColor(0x2ECC71)
-            .setDescription(`✅ تمت إضافة **${amount.toLocaleString()}** ${CURRENCY_NAME} إلى حساب ${user}`);
         
-        return message.reply({ embeds: [embed] });
+        return message.reply({ embeds: [new EmbedBuilder().setColor(0x2ECC71).setDescription(`✅ تم إضافة **${amount.toLocaleString()}** إلى حساب ${user}`)] });
     }
 
-    // --- أمر تحويل (من شخص لآخر) ---
+    // --- أمر تحويل (من شخص لشخص) ---
     if (command === 'تحويل') {
         const user = message.mentions.users.first();
         const amount = parseAmount(args[1]);
+        if (!user || isNaN(amount) || user.id === message.author.id) return message.reply("⚠️ الاستخدام: `!تحويل @user 500` ");
 
-        if (!user || isNaN(amount) || user.id === message.author.id) {
-            return message.reply("⚠️ الاستخدام: `!تحويل @user 1000` ");
-        }
+        const sender = getUserData(message.author.id);
+        if (sender.balance < amount) return message.reply("❌ رصيدك من الفولتا لا يكفي.");
 
-        const senderData = getUserData(message.author.id);
-        if (senderData.balance < amount) return message.reply("❌ رصيدك من الفولتا لا يكفي.");
+        const receiver = getUserData(user.id);
+        sender.balance -= amount;
+        receiver.balance += amount;
+        
+        sender.transactions.push(`تحويل إلى ${user.username}: -${amount.toLocaleString()}`);
+        receiver.transactions.push(`استلام من ${message.author.username}: +${amount.toLocaleString()}`);
 
-        const receiverData = getUserData(user.id);
-
-        // تنفيذ العملية
-        senderData.balance -= amount;
-        receiverData.balance += amount;
-
-        senderData.transactions.push(`تحويل إلى ${user.username}: -${amount.toLocaleString()}`);
-        receiverData.transactions.push(`استلام من ${message.author.username}: +${amount.toLocaleString()}`);
-
-        const embed = new EmbedBuilder()
-            .setColor(0x3498DB)
-            .setTitle('💸 حوالة بنكية ناجحة')
-            .addFields(
-                { name: 'المُرسل:', value: `${message.author}`, inline: true },
-                { name: 'المُستلم:', value: `${user}`, inline: true },
-                { name: 'المبلغ:', value: `**${amount.toLocaleString()}** ${CURRENCY_NAME}`, inline: false }
-            );
-
-        return message.reply({ embeds: [embed] });
+        return message.reply({ embeds: [new EmbedBuilder().setColor(0x3498DB).setTitle('💸 تحويل ناجح').setDescription(`تم تحويل **${amount.toLocaleString()}** إلى ${user}`)] });
     }
 
-    // --- أمر كريدت (نظام طلبات) ---
+    // --- أمر كريدت (مع الإرسال لقناة الإدارة) ---
     if (command === 'كريدت') {
         const amount = parseAmount(args[0]);
-        if (isNaN(amount)) return message.reply("⚠️ يرجى كتابة المبلغ. مثال: `!كريدت 2m` ");
+        if (!amount || isNaN(amount)) return message.reply("⚠️ مثال: `!كريدت 1m` ");
 
         const data = getUserData(message.author.id);
-        if (data.balance < amount) return message.reply("❌ رصيدك لا يكفي لهذا الطلب.");
+        if (data.balance < amount) return message.reply("❌ رصيدك لا يكفي لإتمام الطلب.");
 
         const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder().setCustomId('confirm_cr').setLabel('قبول').setStyle(ButtonStyle.Success),
@@ -143,40 +123,46 @@ client.on('messageCreate', async (message) => {
         );
 
         const response = await message.reply({
-            content: `⚠️ ${message.author}، هل أنت متأكد من تحويل **${amount.toLocaleString()}** ${CURRENCY_NAME} إلى كريدت؟ ستخصم فوراً.`,
+            content: `⚠️ هل أنت متأكد من تحويل **${amount.toLocaleString()}** ${CURRENCY_NAME} إلى كريدت؟`,
             components: [row]
         });
 
         const collector = response.createMessageComponentCollector({ componentType: ComponentType.Button, time: 30000 });
 
         collector.on('collect', async (i) => {
-            if (i.user.id !== message.author.id) return i.reply({ content: 'هذا الزر ليس لك!', ephemeral: true });
-
+            if (i.user.id !== message.author.id) return i.reply({ content: 'الأمر ليس لك!', ephemeral: true });
+            
             if (i.customId === 'confirm_cr') {
-                // التأكد مرة أخرى من الرصيد لحظة الضغط
-                if (data.balance < amount) return i.update({ content: "❌ عذراً، رصيدك نقص قبل تأكيد العملية.", components: [] });
+                if (data.balance < amount) return i.update({ content: "❌ عذراً، رصيدك نقص قبل التأكيد.", components: [] });
 
-                // سحب المبلغ
+                // سحب المبلغ وتسجيل العملية
                 data.balance -= amount;
-                data.transactions.push(`تحويل لكريدت (طلب): -${amount.toLocaleString()}`);
+                data.transactions.push(`تحويل كريدت: -${amount.toLocaleString()}`);
 
-                const resultEmbed = new EmbedBuilder()
+                // إنشاء القائمة (Embed)
+                const logEmbed = new EmbedBuilder()
                     .setColor(0x9B59B6)
-                    .setTitle('📋 تم تسجيل طلب الكريدت')
+                    .setTitle('📋 طلب كريدت جديد')
                     .addFields(
-                        { name: 'الاسم:', value: `${message.author.username}`, inline: true },
-                        { name: 'الأيدي (ID):', value: `\`${message.author.id}\``, inline: true },
+                        { name: 'الاسم:', value: `${i.user.username}`, inline: true },
+                        { name: 'الأيدي (ID):', value: `\`${i.user.id}\``, inline: true },
                         { name: 'المبلغ المسحوب:', value: `**${amount.toLocaleString()}** ${CURRENCY_NAME}`, inline: false }
                     )
-                    .setFooter({ text: 'تم خصم الفولتا بنجاح' });
+                    .setTimestamp()
+                    .setFooter({ text: 'تم سحب المبلغ بنجاح من حساب المستخدم' });
 
-                await i.update({ content: null, embeds: [resultEmbed], components: [] });
+                // إرسال الطلب لقناة الإدارة المحددة
+                const logChannel = client.channels.cache.get(CREDIT_LOG_CHANNEL);
+                if (logChannel) {
+                    await logChannel.send({ embeds: [logEmbed] });
+                }
+
+                await i.update({ content: "✅ تم إرسال طلبك للإدارة وخصم المبلغ من حسابك.", embeds: [logEmbed], components: [] });
             } else {
-                await i.update({ content: '❌ تم إلغاء طلب التحويل.', components: [] });
+                await i.update({ content: '❌ تم إلغاء العملية.', components: [] });
             }
         });
     }
 });
 
-client.once('ready', () => console.log(`✅ ${client.user.tag} جاهز للعمل!`));
-client.login(process.env.TOKEN);
+client.login(TOKEN);
