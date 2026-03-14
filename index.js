@@ -5,20 +5,31 @@ const {
     ActionRowBuilder, 
     ButtonBuilder, 
     ButtonStyle, 
-    ComponentType 
+    ComponentType,
+    Partials // أضفنا هذه
 } = require('discord.js');
 
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.MessageContent, // ضروري جداً لقراءة الأوامر
+        GatewayIntentBits.GuildMembers,   // ضروري للتحقق من الرتبة
+    ],
+    partials: [
+        Partials.Message,
+        Partials.Channel,
+        Partials.User
     ]
 });
 
-const TOKEN = 'YOUR_BOT_TOKEN_HERE';
+// هنا تضع التوكن وبقية الإعدادات
+const TOKEN = process.env.TOKEN || "توكن_بوتك_هنا"; 
 const CURRENCY_NAME = "فولتا";
 const ADMIN_ROLE_ID = "1472225010134421676";
+
+// ... بقية الكود (الأوامر) تبدأ من هنا
+
 
 // قاعدة بيانات بسيطة (تنتهي بانتهاء تشغيل البوت - يفضل لاحقاً ربطها بـ MongoDB أو Quick.db)
 let db = {}; 
