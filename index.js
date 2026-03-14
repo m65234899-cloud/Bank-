@@ -89,6 +89,46 @@ client.on('messageCreate', async (message) => {
         
         return message.reply({ embeds: [new EmbedBuilder().setColor(0x2ECC71).setDescription(`✅ تم إضافة **${amount.toLocaleString()}** إلى حساب ${user}`)] });
     }
+    // --- أمر توب (الأغنياء) ---
+    if (command === 'توب') {
+        const page = parseInt(args[0]) || 1; // رقم الصفحة (تلقائياً 1)
+        const entriesPerPage = 10; // عدد الأشخاص في كل صفحة
+        
+        // ترتيب المستخدمين حسب الرصيد من الأعلى للأقل
+        const sorted = Object.entries(db)
+            .map(([id, data]) => ({ id, balance: data.balance }))
+            .sort((a, b) => b.balance - a.balance);
+
+        const totalPages = Math.ceil(sorted.length / entriesPerPage);
+        
+        // التحقق إذا كانت الصفحة موجودة
+        if (page > totalPages && totalPages > 0) return message.reply(`❌ يوجد فقط ${totalPages} صفحات.`);
+
+        const start = (page - 1) * entriesPerPage;
+        const end = start + entriesPerPage;
+        const topList = sorted.slice(start, end);
+
+        if (topList.length === 0) return message.reply("⚠️ لا توجد بيانات مسجلة حالياً.");
+
+        const embed = new EmbedBuilder()
+            .setColor(0x5865F2)
+            .setTitle(`🏆 قائمة أغنى أعضاء (${CURRENCY_NAME})`)
+            .setDescription(`عرض الصفحة **${page}** من أصل **${totalPages || 1}**`)
+            .setFooter({ text: `طلب بواسطة: ${message.author.username}` })
+            .setTimestamp();
+
+        let listText = "";
+        for (let i = 0; i < topList.length; i++) {
+            const rank = start + i + 1;
+            // محاولة جلب اسم المستخدم من الأيدي
+            const user = await client.users.fetch(topList[i].id).catch(() => null);
+            const userName = user ? user.username : "مستخدم غير معروف";
+            listText += `**#${rank}** | ${userName} - \`${topList[i].balance.toLocaleString()}\`\n`;
+        }
+
+        embed.addFields({ name: "الترتيب الحالي:", value: listText || "لا توجد بيانات" });
+        return message.reply({ embeds: [embed] });
+    }
 
     // --- أمر تحويل (من شخص لشخص) ---
     if (command === 'تحويل') {
